@@ -9,8 +9,9 @@
 - 可选 Cookie（提高获取高质量/会员内容的可访问性）
 - 可选自动检测或手动命令触发
 
-## 安装
-将插件目录放入 AstrBot 插件目录后启用即可。
+## 安装与依赖
+- 建议搭配视频解析服务使用，否则**无法使用视频下载功能**：
+  https://github.com/Chinachani/bilibiliwatch-api-service
 
 ## 命令
 - `/bili help` 或 `/bili_menu` 查看菜单
