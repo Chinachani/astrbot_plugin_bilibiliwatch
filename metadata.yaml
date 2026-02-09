@@ -1,0 +1,5 @@
+name: astrbot_plugin_bilibiliwatch
+version: 1.0.0
+author: Chinachani
+description: B站链接解析与视频信息展示插件
+repository: https://github.com/Chinachani/astrbot_plugin_bilibiliwatch

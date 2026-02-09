@@ -1,0 +1,132 @@
+{
+  "bilibili_cookie": {
+    "type": "string",
+    "description": "B站 Cookie（可选，用于会员/高质量/登录态信息）",
+    "default": ""
+  },
+  "video_api_base_url": {
+    "type": "string",
+    "description": "自定义视频解析 API 基础地址（可选，例：http://127.0.0.1:8000；要求提供 /api/video/info）",
+    "default": ""
+  },
+  "video_api_login_token": {
+    "type": "string",
+    "description": "视频解析 API 的登录令牌（用于 /api/login/*）",
+    "default": ""
+  },
+  "custom_api_fallback_official": {
+    "type": "bool",
+    "description": "自定义 API 失败时是否回退到官方接口",
+    "default": true
+  },
+  "prefer_official_api": {
+    "type": "bool",
+    "description": "获取视频信息时优先使用官方接口",
+    "default": false
+  },
+  "video_download_timeout_sec": {
+    "type": "int",
+    "description": "视频文件下载等待超时（秒，0=不限制）",
+    "default": 0
+  },
+  "video_progress_stall_limit": {
+    "type": "int",
+    "description": "下载进度停滞判定次数（达到后跳过）",
+    "default": 3
+  },
+  "max_video_duration_sec": {
+    "type": "int",
+    "description": "视频时长超过该值则不尝试发送视频文件（单位分钟，0=不限制）",
+    "default": 0
+  },
+  "max_video_file_size_mb": {
+    "type": "int",
+    "description": "视频文件大小超过该值则拒绝发送（单位MB，0=不限制）",
+    "default": 0
+  },
+  "video_quality_preset": {
+    "type": "int",
+    "description": "视频画质预设：-1=低，0=中，1=高（默认0）",
+    "default": 0
+  },
+  "auto_lower_quality_on_oversize": {
+    "type": "bool",
+    "description": "文件过大时自动降到最低画质（可能低于 -1）",
+    "default": false
+  },
+  "enable_auto_detect": {
+    "type": "bool",
+    "description": "是否启用自动检测消息中的B站链接",
+    "default": true
+  },
+  "enable_parse_miniapp": {
+    "type": "bool",
+    "description": "是否解析QQ小程序卡片中的B站链接",
+    "default": true
+  },
+  "api_timeout_sec": {
+    "type": "int",
+    "description": "API 请求超时（秒）",
+    "default": 10
+  },
+  "request_retries": {
+    "type": "int",
+    "description": "请求重试次数",
+    "default": 2
+  },
+  "retry_delay_sec": {
+    "type": "int",
+    "description": "重试间隔（秒）",
+    "default": 1
+  },
+  "show_cover": {
+    "type": "bool",
+    "description": "是否输出封面链接",
+    "default": true
+  },
+  "enable_video_output": {
+    "type": "bool",
+    "description": "是否尝试发送视频文件（需配置 video_api_base_url）",
+    "default": false
+  },
+  "enable_http_callback": {
+    "type": "bool",
+    "description": "是否启用下载完成 HTTP 回调（API 主动推送）",
+    "default": false
+  },
+  "callback_listen_host": {
+    "type": "string",
+    "description": "回调监听地址（默认 0.0.0.0）",
+    "default": "0.0.0.0"
+  },
+  "callback_listen_port": {
+    "type": "int",
+    "description": "回调监听端口（默认 8787，设置 0 关闭）",
+    "default": 8787
+  },
+  "callback_fallback_sec": {
+    "type": "int",
+    "description": "回调未触达时等待多少秒后改用轮询（0=不启用）",
+    "default": 15
+  },
+  "callback_token": {
+    "type": "string",
+    "description": "回调令牌（与 API 的 CALLBACK_TOKEN 保持一致）",
+    "default": ""
+  },
+  "user_agent": {
+    "type": "string",
+    "description": "自定义 User-Agent",
+    "default": "BiliWatchBot/1.0"
+  },
+  "debug_log": {
+    "type": "bool",
+    "description": "是否开启调试日志",
+    "default": false
+  },
+  "enable_parse_hint": {
+    "type": "bool",
+    "description": "是否在解析前发送提示语",
+    "default": true
+  }
+}
