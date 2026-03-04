@@ -11,7 +11,7 @@ import httpx
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import Image, Node, Nodes, Plain, Video
+from astrbot.api.message_components import Image, Node, Nodes, Plain, Record, Video
 from astrbot.api.star import Context, Star, register
 
 
@@ -41,7 +41,7 @@ class VideoTarget:
     "astrbot_plugin_bilibiliwatch",
     "Chinachani",
     "B站链接解析与视频信息展示插件",
-    "1.0.0",
+    "1.0.1",
     "https://github.com/Chinachani/astrbot_plugin_bilibiliwatch",
 )
 class BilibiliWatch(Star):
@@ -52,6 +52,7 @@ class BilibiliWatch(Star):
         self._callback_tasks: Dict[str, Dict[str, Any]] = {}
         self._callback_server: Optional[ThreadingHTTPServer] = None
         self._callback_thread: Optional[threading.Thread] = None
+        self._callback_server_failed: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def _get_event_text(self, event: AstrMessageEvent) -> str:
@@ -218,6 +219,12 @@ class BilibiliWatch(Star):
 
     def _enable_video_output(self) -> bool:
         return bool(self.config.get("enable_video_output", False))
+
+    def _enable_audio_voice_output(self) -> bool:
+        return bool(self.config.get("enable_audio_voice_output", False))
+
+    def _audio_voice_only_mode(self) -> bool:
+        return bool(self.config.get("audio_voice_only_mode", False))
 
     def _enable_auto(self) -> bool:
         return bool(self.config.get("enable_auto_detect", True))
@@ -628,7 +635,11 @@ class BilibiliWatch(Star):
         if not resolved:
             return event.plain_result("链接都解析不了，发个正确的啦。")
         if self._enable_parse_hint():
-            await event.send(MessageChain().message("在解析呢，别催～"))
+            try:
+                await event.send(MessageChain().message("在解析呢，别催～"))
+            except Exception as exc:
+                if self._debug():
+                    logger.error("bili: send failed: %s", exc)
         ok, message, cover, link, duration_sec, title = await self._fetch_video_info(resolved)
         if not ok:
             return event.plain_result(f"拿不到信息呢：{message}")
@@ -638,6 +649,14 @@ class BilibiliWatch(Star):
             chain.url_image(cover)
         chain.message(message)
         await event.send(chain)
+        if self._enable_audio_voice_output() and self._audio_voice_only_mode() and link:
+            max_audio_len = self._max_audio_duration_sec()
+            if max_audio_len > 0 and duration_sec > max_audio_len:
+                await event.send(MessageChain().message("音频太长啦，不给你发语音。"))
+                return None
+            await event.send(MessageChain().message("在抓语音啦，别催～"))
+            asyncio.create_task(self._send_audio_bundle(event, link, title, duration_sec))
+            return None
         # 如需视频文件，转发消息里携带
         if self._enable_video_output() and link:
             max_len = self._max_video_duration_sec()
@@ -743,12 +762,25 @@ class BilibiliWatch(Star):
                 if status_msg:
                     await event.send(MessageChain().message(status_msg))
                 return
-            self._register_callback_task(task_id, event, message, cover, link, title, duration_sec)
+            self._register_callback_task(task_id, event, message, cover, link, title, duration_sec, asset_type="video")
             asyncio.create_task(self._callback_fallback(task_id))
             return
 
         video_url, status_msg = await self._get_video_file_url(link, title, duration_sec)
         await self._send_forward_with_video(event, message, cover, video_url, status_msg)
+
+    async def _send_audio_bundle(self, event: AstrMessageEvent, link: str, title: str, duration_sec: int):
+        if self._enable_http_callback():
+            task_id, status_msg = await self._create_download_task(link, title, duration_sec, audio_only=True)
+            if not task_id:
+                if status_msg:
+                    await event.send(MessageChain().message(status_msg))
+                return
+            self._register_callback_task(task_id, event, "", "", link, title, duration_sec, asset_type="audio")
+            asyncio.create_task(self._callback_fallback(task_id))
+            return
+        audio_url, status_msg = await self._get_audio_file_url(link, title, duration_sec)
+        await self._send_audio_record(event, audio_url, status_msg)
 
     async def _send_forward_with_video(self, event: AstrMessageEvent, message: str, cover: str, video_url: str, status_msg: str = ""):
         nodes: list[Node] = []
@@ -778,6 +810,7 @@ class BilibiliWatch(Star):
         link: str,
         title: str,
         duration_sec: int,
+        asset_type: str = "video",
     ):
         self._callback_tasks[task_id] = {
             "event": event,
@@ -786,6 +819,7 @@ class BilibiliWatch(Star):
             "link": link,
             "title": title,
             "duration_sec": duration_sec,
+            "asset_type": asset_type,
         }
 
     async def _callback_fallback(self, task_id: str):
@@ -801,37 +835,48 @@ class BilibiliWatch(Star):
         base_url = str(self.config.get("video_api_base_url", "") or "").strip().rstrip("/")
         if not base_url:
             return
-        video_url, status_msg = await self._poll_existing_task(
-            base_url,
-            task_id,
-            info["link"],
-            info["title"],
-            info["duration_sec"],
-        )
-        await self._send_forward_with_video(
-            info["event"],
-            info["message"],
-            info["cover"],
-            video_url,
-            status_msg,
-        )
+        if info.get("asset_type") == "audio":
+            audio_url, status_msg = await self._poll_existing_audio_task(
+                base_url,
+                task_id,
+                info["link"],
+                info["title"],
+                info["duration_sec"],
+            )
+            await self._send_audio_record(info["event"], audio_url, status_msg)
+        else:
+            video_url, status_msg = await self._poll_existing_task(
+                base_url,
+                task_id,
+                info["link"],
+                info["title"],
+                info["duration_sec"],
+            )
+            await self._send_forward_with_video(
+                info["event"],
+                info["message"],
+                info["cover"],
+                video_url,
+                status_msg,
+            )
 
-    async def _create_download_task(self, video_link: str, title: str = "", duration_sec: int = 0) -> Tuple[str, str]:
+    async def _create_download_task(self, video_link: str, title: str = "", duration_sec: int = 0, audio_only: bool = False) -> Tuple[str, str]:
         base_url = str(self.config.get("video_api_base_url", "") or "").strip().rstrip("/")
         if not base_url:
             return "", "还没配视频API呢，想啥呢～"
 
-        existing_name, existing_size = await self._find_existing_file(base_url, video_link, title)
-        if existing_name:
-            size_limit = self._max_video_file_size_bytes()
-            if size_limit > 0 and isinstance(existing_size, int) and existing_size > size_limit:
-                mb = existing_size / 1024 / 1024
-                return "", f"文件太大啦（{mb:.2f}MB），不准发～"
-            return "", "已经有成品啦，直接 /bili_file send 发就是了。"
+        if not audio_only:
+            existing_name, existing_size = await self._find_existing_file(base_url, video_link, title)
+            if existing_name:
+                size_limit = self._max_video_file_size_bytes()
+                if size_limit > 0 and isinstance(existing_size, int) and existing_size > size_limit:
+                    mb = existing_size / 1024 / 1024
+                    return "", f"文件太大啦（{mb:.2f}MB），不准发～"
+                return "", "已经有成品啦，直接 /bili_file send 发就是了。"
 
         size_limit = self._max_video_file_size_bytes()
         chosen_index = self._video_quality_index()
-        if size_limit > 0 and duration_sec > 0:
+        if not audio_only and size_limit > 0 and duration_sec > 0:
             chosen_index, _, hint_msg = await self._pick_quality_by_size(
                 base_url, video_link, duration_sec, size_limit, chosen_index
             )
@@ -841,8 +886,9 @@ class BilibiliWatch(Star):
         filename_hint = self._sanitize_filename(title)
         params = {
             "url": video_link,
-            "merge": "true",
+            "merge": "false" if audio_only else "true",
             "video_quality": str(chosen_index),
+            "audio_quality": str(self._audio_quality_index()),
         }
         if filename_hint:
             params["filename"] = filename_hint
@@ -866,6 +912,8 @@ class BilibiliWatch(Star):
         if not self._enable_http_callback():
             return
         if self._callback_server is not None:
+            return
+        if self._callback_server_failed:
             return
         port = self._callback_port()
         if port <= 0:
@@ -910,6 +958,7 @@ class BilibiliWatch(Star):
         except Exception as exc:
             if self._debug():
                 logger.error("bili: callback server start failed: %s", exc)
+            self._callback_server_failed = True
             return
         self._callback_server = server
         self._callback_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -938,6 +987,10 @@ class BilibiliWatch(Star):
         if not event:
             return
         base_url = self._api_base()
+        if info.get("asset_type") == "audio":
+            audio_url = f"{base_url}/api/download/audio/{task_id}"
+            await self._send_audio_record(event, audio_url, "")
+            return
         filename = str(payload.get("filename") or payload.get("file_name") or "").strip()
         video_url = ""
         if filename:
@@ -1090,6 +1143,37 @@ class BilibiliWatch(Star):
         # 2) poll status
         return await self._poll_existing_task(base_url, task_id, video_link, title, duration_sec)
 
+    async def _get_audio_file_url(self, video_link: str, title: str = "", duration_sec: int = 0) -> Tuple[str, str]:
+        base_url = str(self.config.get("video_api_base_url", "") or "").strip().rstrip("/")
+        if not base_url:
+            return "", "还没配视频API呢，想啥呢～"
+        status, text = await self._request_text(
+            f"{base_url}/api/video/download",
+            {
+                "url": video_link,
+                "merge": "false",
+                "video_quality": str(self._video_quality_index()),
+                "audio_quality": str(self._audio_quality_index()),
+                "filename": self._sanitize_filename(title),
+            },
+        )
+        if status == 409:
+            m_exist = re.search(r"已存在任务ID[:：]\s*([a-f0-9\\-]{8,})", text, re.I)
+            if m_exist:
+                task_id = m_exist.group(1)
+            else:
+                return "", "创建语音任务失败：HTTP 409（任务已存在）"
+        elif status != 200 or not text:
+            if status == 599:
+                return "", "创建语音任务失败：HTTP 599（网络错误/超时/无法连接API）"
+            return "", f"创建语音任务失败：HTTP {status}"
+        else:
+            m = re.search(r"任务ID[:：]\s*([a-f0-9\\-]{8,})", text, re.I)
+            if not m:
+                return "", "语音任务ID都没拿到。"
+            task_id = m.group(1)
+        return await self._poll_existing_audio_task(base_url, task_id, video_link, title, duration_sec)
+
     async def _poll_existing_task(
         self,
         base_url: str,
@@ -1145,6 +1229,52 @@ class BilibiliWatch(Star):
             await self._cancel_download_task(base_url, task_id)
             return "", "超时啦，只给你图文。"
         return "", "下载失败了，别指望我。"
+
+    async def _poll_existing_audio_task(
+        self,
+        base_url: str,
+        task_id: str,
+        video_link: str,
+        title: str,
+        duration_sec: int,
+    ) -> Tuple[str, str]:
+        timeout_sec = self._video_download_timeout_sec()
+        deadline = None
+        if timeout_sec > 0:
+            deadline = asyncio.get_event_loop().time() + timeout_sec
+        while True:
+            if deadline is not None and asyncio.get_event_loop().time() >= deadline:
+                break
+            s, st = await self._request_text(f"{base_url}/api/download/status/{task_id}", {})
+            if s == 404:
+                return "", "语音任务不存在，已停止轮询。"
+            if s == 200:
+                status_upper = str(st).upper()
+                if "失败" in st or "FAILED" in status_upper:
+                    await self._cancel_download_task(base_url, task_id)
+                    return "", "语音下载失败了。"
+                if "已完成" in st or "COMPLETED" in status_upper:
+                    return f"{base_url}/api/download/audio/{task_id}", ""
+            await asyncio.sleep(self._video_poll_interval_sec())
+        if deadline is not None:
+            await self._cancel_download_task(base_url, task_id)
+            return "", "语音超时啦，只给你图文。"
+        return "", "语音下载失败了。"
+
+    async def _send_audio_record(self, event: AstrMessageEvent, audio_url: str, status_msg: str = ""):
+        if not audio_url:
+            if status_msg:
+                await event.send(MessageChain().message(status_msg))
+            return
+        chain = MessageChain()
+        chain.chain.append(Record.fromURL(audio_url))
+        try:
+            await event.send(chain)
+        except Exception as exc:
+            if self._debug():
+                logger.error("bili: send audio failed: %s", exc)
+            if status_msg:
+                await event.send(MessageChain().message(status_msg))
 
     async def _pick_quality_by_size(
         self,
@@ -1333,6 +1463,26 @@ class BilibiliWatch(Star):
 
     def _auto_lower_quality(self) -> bool:
         return bool(self.config.get("auto_lower_quality_on_oversize", False))
+
+    def _audio_quality_index(self) -> int:
+        try:
+            preset = int(self.config.get("audio_quality_preset", 0))
+        except Exception:
+            preset = 0
+        if preset <= -1:
+            return 2
+        if preset >= 1:
+            return 0
+        return 1
+
+    def _max_audio_duration_sec(self) -> int:
+        try:
+            minutes = int(self.config.get("max_audio_duration_min", 0))
+        except Exception:
+            return 0
+        if minutes <= 0:
+            return 0
+        return minutes * 60
 
     def _parse_duration_to_seconds(self, value: Any) -> int:
         try:
@@ -1841,6 +1991,10 @@ class BilibiliWatch(Star):
                 "- video_api_base_url    自建解析API地址\n"
                 "- video_api_login_token 登录令牌\n"
                 "- enable_video_output   是否发送视频文件\n"
+                "- enable_audio_voice_output 是否启用语音发送\n"
+                "- audio_voice_only_mode  启用后仅发语音不发视频\n"
+                "- max_audio_duration_min 语音时长限制(分钟)\n"
+                "- audio_quality_preset  音质(-1/0/1)\n"
                 "- show_cover            是否显示封面\n"
                 "- max_video_duration_sec 视频时长限制(分钟)\n"
                 "- max_video_file_size_mb 文件大小限制(MB)\n"
@@ -1862,7 +2016,7 @@ class BilibiliWatch(Star):
         )
 
     async def _safe_send_text(self, event: AstrMessageEvent, text: str):
-        chunk_size = 200
+        chunk_size = 500
         if not text:
             return
         parts: list[str] = []
@@ -1883,7 +2037,9 @@ class BilibiliWatch(Star):
             except Exception as exc:
                 if self._debug():
                     logger.error("bili: send failed: %s", exc)
-                return None
+                await asyncio.sleep(1)
+                continue
+            await asyncio.sleep(0.4)
         return None
 
     async def _send_plain_once(self, event: AstrMessageEvent, text: str):
@@ -1894,6 +2050,7 @@ class BilibiliWatch(Star):
         except Exception as exc:
             if self._debug():
                 logger.error("bili: send failed: %s", exc)
+            await self._safe_send_text(event, text)
         return None
 
     async def _send_forward_blocks(self, event: AstrMessageEvent, blocks: list[str]):

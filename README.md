@@ -9,9 +9,11 @@
 - 可选 Cookie（提高获取高质量/会员内容的可访问性）
 - 可选自动检测或手动命令触发
 
-## 安装与依赖
-- 建议搭配视频解析服务使用，否则**无法使用视频下载功能**：
-  https://github.com/Chinachani/bilibiliwatch-api-service
+## 安装与视频下载服务
+本插件仅负责解析与消息发送，视频下载功能需要配套的解析服务：
+https://github.com/Chinachani/bilibiliwatch-api-service
+
+建议搭配该服务使用，否则**无法使用视频下载功能**。
 
 ## 命令
 - `/bili help` 或 `/bili_menu` 查看菜单
@@ -76,6 +78,10 @@
 - `retry_delay_sec`: 重试间隔秒数（默认 1）
 - `show_cover`: 是否显示封面链接（默认 true）
 - `enable_video_output`: 是否尝试发送视频文件（默认 false，需要配置 `video_api_base_url`）
+- `enable_audio_voice_output`: 是否尝试发送语音（默认 false，需要配置 `video_api_base_url`）
+- `audio_voice_only_mode`: 启用后仅发送语音，不发送视频（默认 false）
+- `max_audio_duration_min`: 语音时长限制（分钟，0=不限制）
+- `audio_quality_preset`: 音频质量预设（-1=低，0=中，1=高，默认0）
 - `enable_http_callback`: 是否启用下载完成回调（默认 false）
 - `callback_listen_host`: 回调监听地址（默认 0.0.0.0）
 - `callback_listen_port`: 回调监听端口（默认 8787，设为 0 关闭）
@@ -90,6 +96,7 @@
 - 如配置了 `video_api_base_url`，将优先使用自定义解析 API（需提供 `/api/video/info?url=...`，返回纯文本）。
 - 如需禁用回退，请将 `custom_api_fallback_official` 设为 false。
 - 如启用 `enable_video_output`，会调用自建解析服务的下载接口，完成后发送视频文件（合并转发里）。 
+- 如同时启用 `enable_audio_voice_output` + `audio_voice_only_mode`，将仅发送语音消息（Record）。
 - 如启用 `enable_http_callback`，需要在 API 服务设置 `CALLBACK_URL` 指向机器人回调地址（如 `http://机器人IP:8787/bili/callback`）。
 - 回调 token 建议由插件统一管理：设置好 `callback_token` 后，执行 `/bili_callback sync` 同步到 API。
 - `video_api_login_token` 用于插件远程配置 API（登录/回调配置接口），不填则无法同步。

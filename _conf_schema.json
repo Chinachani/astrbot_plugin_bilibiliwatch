@@ -89,6 +89,26 @@
     "description": "是否尝试发送视频文件（需配置 video_api_base_url）",
     "default": false
   },
+  "enable_audio_voice_output": {
+    "type": "bool",
+    "description": "是否尝试发送音频语音（需配置 video_api_base_url）",
+    "default": false
+  },
+  "audio_voice_only_mode": {
+    "type": "bool",
+    "description": "启用后仅发送语音，不发送视频文件",
+    "default": false
+  },
+  "max_audio_duration_min": {
+    "type": "int",
+    "description": "语音时长超过该值则不发送语音（单位分钟，0=不限制）",
+    "default": 0
+  },
+  "audio_quality_preset": {
+    "type": "int",
+    "description": "音频质量预设：-1=低，0=中，1=高（默认0）",
+    "default": 0
+  },
   "enable_http_callback": {
     "type": "bool",
     "description": "是否启用下载完成 HTTP 回调（API 主动推送）",
