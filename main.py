@@ -903,6 +903,8 @@ class BilibiliWatch(Star):
             "video_quality": str(chosen_index),
             "audio_quality": str(self._audio_quality_index()),
         }
+        if audio_only:
+            params["audio_only"] = "true"
         if filename_hint:
             params["filename"] = filename_hint
 
@@ -1170,6 +1172,7 @@ class BilibiliWatch(Star):
             {
                 "url": video_link,
                 "merge": "false",
+                "audio_only": "true",
                 "video_quality": str(self._video_quality_index()),
                 "audio_quality": str(self._audio_quality_index()),
                 "filename": self._sanitize_filename(title),
