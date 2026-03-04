@@ -99,9 +99,9 @@
     "description": "启用后仅发送语音，不发送视频文件",
     "default": false
   },
-  "max_audio_duration_min": {
+  "max_audio_duration_sec": {
     "type": "int",
-    "description": "语音时长超过该值则不发送语音（单位分钟，0=不限制）",
+    "description": "语音时长限制（秒，超出会截取前 N 秒发送，0=不限制）",
     "default": 0
   },
   "audio_quality_preset": {

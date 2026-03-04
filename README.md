@@ -80,7 +80,7 @@ https://github.com/Chinachani/bilibiliwatch-api-service
 - `enable_video_output`: 是否尝试发送视频文件（默认 false，需要配置 `video_api_base_url`）
 - `enable_audio_voice_output`: 是否尝试发送语音（默认 false，需要配置 `video_api_base_url`）
 - `audio_voice_only_mode`: 启用后仅发送语音，不发送视频（默认 false）
-- `max_audio_duration_min`: 语音时长限制（分钟，0=不限制）
+- `max_audio_duration_sec`: 语音时长限制（秒，0=不限制；超出时自动截取前 N 秒）
 - `audio_quality_preset`: 音频质量预设（-1=低，0=中，1=高，默认0）
 - `enable_http_callback`: 是否启用下载完成回调（默认 false）
 - `callback_listen_host`: 回调监听地址（默认 0.0.0.0）
@@ -97,6 +97,7 @@ https://github.com/Chinachani/bilibiliwatch-api-service
 - 如需禁用回退，请将 `custom_api_fallback_official` 设为 false。
 - 如启用 `enable_video_output`，会调用自建解析服务的下载接口，完成后发送视频文件（合并转发里）。 
 - 如同时启用 `enable_audio_voice_output` + `audio_voice_only_mode`，将仅发送语音消息（Record）。
+- 当 `max_audio_duration_sec > 0` 且原视频更长时，会自动截取前 N 秒语音发送。
 - 如启用 `enable_http_callback`，需要在 API 服务设置 `CALLBACK_URL` 指向机器人回调地址（如 `http://机器人IP:8787/bili/callback`）。
 - 回调 token 建议由插件统一管理：设置好 `callback_token` 后，执行 `/bili_callback sync` 同步到 API。
 - `video_api_login_token` 用于插件远程配置 API（登录/回调配置接口），不填则无法同步。

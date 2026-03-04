@@ -652,8 +652,7 @@ class BilibiliWatch(Star):
         if self._enable_audio_voice_output() and self._audio_voice_only_mode() and link:
             max_audio_len = self._max_audio_duration_sec()
             if max_audio_len > 0 and duration_sec > max_audio_len:
-                await event.send(MessageChain().message("音频太长啦，不给你发语音。"))
-                return None
+                await event.send(MessageChain().message(f"音频太长啦，只给你前 {max_audio_len} 秒。"))
             await event.send(MessageChain().message("在抓语音啦，别催～"))
             asyncio.create_task(self._send_audio_bundle(event, link, title, duration_sec))
             return None
@@ -770,16 +769,27 @@ class BilibiliWatch(Star):
         await self._send_forward_with_video(event, message, cover, video_url, status_msg)
 
     async def _send_audio_bundle(self, event: AstrMessageEvent, link: str, title: str, duration_sec: int):
+        clip_sec = self._audio_clip_sec(duration_sec)
         if self._enable_http_callback():
             task_id, status_msg = await self._create_download_task(link, title, duration_sec, audio_only=True)
             if not task_id:
                 if status_msg:
                     await event.send(MessageChain().message(status_msg))
                 return
-            self._register_callback_task(task_id, event, "", "", link, title, duration_sec, asset_type="audio")
+            self._register_callback_task(
+                task_id,
+                event,
+                "",
+                "",
+                link,
+                title,
+                duration_sec,
+                asset_type="audio",
+                clip_sec=clip_sec,
+            )
             asyncio.create_task(self._callback_fallback(task_id))
             return
-        audio_url, status_msg = await self._get_audio_file_url(link, title, duration_sec)
+        audio_url, status_msg = await self._get_audio_file_url(link, title, duration_sec, clip_sec=clip_sec)
         await self._send_audio_record(event, audio_url, status_msg)
 
     async def _send_forward_with_video(self, event: AstrMessageEvent, message: str, cover: str, video_url: str, status_msg: str = ""):
@@ -811,6 +821,7 @@ class BilibiliWatch(Star):
         title: str,
         duration_sec: int,
         asset_type: str = "video",
+        clip_sec: int = 0,
     ):
         self._callback_tasks[task_id] = {
             "event": event,
@@ -820,6 +831,7 @@ class BilibiliWatch(Star):
             "title": title,
             "duration_sec": duration_sec,
             "asset_type": asset_type,
+            "clip_sec": clip_sec,
         }
 
     async def _callback_fallback(self, task_id: str):
@@ -842,6 +854,7 @@ class BilibiliWatch(Star):
                 info["link"],
                 info["title"],
                 info["duration_sec"],
+                clip_sec=int(info.get("clip_sec", 0) or 0),
             )
             await self._send_audio_record(info["event"], audio_url, status_msg)
         else:
@@ -988,7 +1001,10 @@ class BilibiliWatch(Star):
             return
         base_url = self._api_base()
         if info.get("asset_type") == "audio":
+            clip_sec = int(info.get("clip_sec", 0) or 0)
             audio_url = f"{base_url}/api/download/audio/{task_id}"
+            if clip_sec > 0:
+                audio_url = f"{audio_url}?max_sec={clip_sec}"
             await self._send_audio_record(event, audio_url, "")
             return
         filename = str(payload.get("filename") or payload.get("file_name") or "").strip()
@@ -1143,7 +1159,9 @@ class BilibiliWatch(Star):
         # 2) poll status
         return await self._poll_existing_task(base_url, task_id, video_link, title, duration_sec)
 
-    async def _get_audio_file_url(self, video_link: str, title: str = "", duration_sec: int = 0) -> Tuple[str, str]:
+    async def _get_audio_file_url(
+        self, video_link: str, title: str = "", duration_sec: int = 0, clip_sec: int = 0
+    ) -> Tuple[str, str]:
         base_url = str(self.config.get("video_api_base_url", "") or "").strip().rstrip("/")
         if not base_url:
             return "", "还没配视频API呢，想啥呢～"
@@ -1172,7 +1190,7 @@ class BilibiliWatch(Star):
             if not m:
                 return "", "语音任务ID都没拿到。"
             task_id = m.group(1)
-        return await self._poll_existing_audio_task(base_url, task_id, video_link, title, duration_sec)
+        return await self._poll_existing_audio_task(base_url, task_id, video_link, title, duration_sec, clip_sec=clip_sec)
 
     async def _poll_existing_task(
         self,
@@ -1237,6 +1255,7 @@ class BilibiliWatch(Star):
         video_link: str,
         title: str,
         duration_sec: int,
+        clip_sec: int = 0,
     ) -> Tuple[str, str]:
         timeout_sec = self._video_download_timeout_sec()
         deadline = None
@@ -1254,7 +1273,10 @@ class BilibiliWatch(Star):
                     await self._cancel_download_task(base_url, task_id)
                     return "", "语音下载失败了。"
                 if "已完成" in st or "COMPLETED" in status_upper:
-                    return f"{base_url}/api/download/audio/{task_id}", ""
+                    audio_url = f"{base_url}/api/download/audio/{task_id}"
+                    if clip_sec > 0:
+                        audio_url = f"{audio_url}?max_sec={clip_sec}"
+                    return audio_url, ""
             await asyncio.sleep(self._video_poll_interval_sec())
         if deadline is not None:
             await self._cancel_download_task(base_url, task_id)
@@ -1477,12 +1499,23 @@ class BilibiliWatch(Star):
 
     def _max_audio_duration_sec(self) -> int:
         try:
+            if "max_audio_duration_sec" in self.config:
+                return max(0, int(self.config.get("max_audio_duration_sec", 0)))
+            # backward compatibility: legacy key used minutes
             minutes = int(self.config.get("max_audio_duration_min", 0))
         except Exception:
             return 0
         if minutes <= 0:
             return 0
         return minutes * 60
+
+    def _audio_clip_sec(self, duration_sec: int) -> int:
+        limit = self._max_audio_duration_sec()
+        if limit <= 0 or duration_sec <= 0:
+            return 0
+        if duration_sec > limit:
+            return limit
+        return 0
 
     def _parse_duration_to_seconds(self, value: Any) -> int:
         try:
@@ -1993,7 +2026,7 @@ class BilibiliWatch(Star):
                 "- enable_video_output   是否发送视频文件\n"
                 "- enable_audio_voice_output 是否启用语音发送\n"
                 "- audio_voice_only_mode  启用后仅发语音不发视频\n"
-                "- max_audio_duration_min 语音时长限制(分钟)\n"
+                "- max_audio_duration_sec 语音时长限制(秒，超出会截断)\n"
                 "- audio_quality_preset  音质(-1/0/1)\n"
                 "- show_cover            是否显示封面\n"
                 "- max_video_duration_sec 视频时长限制(分钟)\n"
